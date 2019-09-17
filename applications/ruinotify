@@ -232,17 +232,17 @@ Returns a file handle for the data file or undef on error.
 =cut
 
 sub open_data {
-  my $ruinerdata = shift;
+  my $datafile = shift;
   my $logger = shift;
 
-  if ((!(defined ($ruinerdata))) || (!(defined ($logger)))) {
+  if ((!(defined ($datafile))) || (!(defined ($logger)))) {
     $logger->error ("Passed invalid data to " . (caller(0))[3] . ".") if defined ($logger);
     return;
   }
 
   my $fh = undef;
-  if (!(open ($fh, '+>>:encoding(UTF-8)', $ruinerdata))) {
-    $logger->logdie ("Unable to open data file '$ruinerdata' for reading and writing: $!");
+  if (!(open ($fh, '+>>:encoding(UTF-8)', $datafile))) {
+    $logger->logdie ("Unable to open data file '$datafile' for reading and writing: $!");
   }
   seek ($fh, 0, SEEK_SET);
 
@@ -460,7 +460,7 @@ Returns a standard process return value.
 
 sub main {
   my $lockfh = undef;
-  my $ruinerdatafh = undef;
+  my $datafh = undef;
 
   my $prog_name = 'ruinotify';
 
@@ -496,9 +496,9 @@ sub main {
 
   my $useragent = prepare_webrequest ();
 
-  $ruinerdatafh = open_data (File::Spec->catfile ($datadir, 'data'), $logger);
+  $datafh = open_data (File::Spec->catfile ($datadir, 'data'), $logger);
 
-  if (!(defined ($ruinerdatafh))) {
+  if (!(defined ($datafh))) {
     $logger->logdie ("Internal error while opening internal data, exiting.");
   }
 
@@ -537,10 +537,10 @@ sub main {
 
     # Reset filehandle to beginning of file. It probably is at (or close to EOF)
     # right now since we wrote data to it in the previous run.
-    seek ($ruinerdatafh, 0, SEEK_SET);
+    seek ($datafh, 0, SEEK_SET);
 
     # Read first line, optionally chomp it.
-    my $row = <$ruinerdatafh>;
+    my $row = <$datafh>;
     if (defined ($row)) {
       chomp ($row);
     }
@@ -554,7 +554,7 @@ sub main {
     }
 
     # Read second line, optionally chomp it.
-    $row = <$ruinerdatafh>;
+    $row = <$datafh>;
     if (defined ($row)) {
       chomp ($row);
     }
@@ -565,7 +565,7 @@ sub main {
     }
 
     # Reset file contents, we'll write new values later on.
-    truncate ($ruinerdatafh, 0);
+    truncate ($datafh, 0);
 
     if (defined ($userid)) {
       if ($userid eq $new_userid) {
@@ -581,8 +581,8 @@ sub main {
       }
     }
 
-    print $ruinerdatafh "$new_userid\n$new_bcastcount\n$new_bcastid\n";
-    $ruinerdatafh->flush ();
+    print $datafh "$new_userid\n$new_bcastcount\n$new_bcastid\n";
+    $datafh->flush ();
 
     if ($alert) {
       # Make relative values in audiofiles config file work by changing
