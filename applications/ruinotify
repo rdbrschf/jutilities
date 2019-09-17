@@ -1,0 +1,704 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use JSON::PP qw (from_json);
+use LWP::UserAgent;
+use Fcntl qw (:flock SEEK_SET);
+use File::BaseDir qw(data_dirs config_dirs data_home config_home);
+use File::Path qw(make_path);
+use File::Spec;
+use IO::Handle qw(flush);
+use Log::Log4perl;
+use Log::Log4perl::Appender::File::FixedSize;
+use Data::Dumper;
+
+exit (main (@ARGV));
+
+=head1 NAME
+
+ruinotify - issue acoustic notifications for new live streams
+
+=head1 VERSION
+
+Version 0.2.0
+
+=cut
+
+our $VERSION = '0.2.0';
+
+
+=head1 SYNOPSIS
+
+This is a more or less simple program issuing notification sounds whenever new
+live streams are detected.
+
+To make sure that the program is always running and restarted after a crash,
+install a cron job calling it once every minute. Subsequent calls will be
+ignored if one instance is already running.
+
+=head1 DESCRIPTION
+
+To use this program:
+
+=over
+
+=item * Start it up once.
+
+That will fail, but it's fine - it will still initialize the needed directory
+structure.
+
+=item * Locate the XDG config directory.
+
+Typically, that would be ~/.config/ruinotify on UNIX-based systems.
+
+=item * Create a new file called "audiofiles".
+
+=item * Place each notification sound on one unique line.
+
+You will need to specify at least one notification sound for the program to
+work.
+
+Paths can be either relative, in which case they will be used relative to
+the XDG data directory (e.g., ~/.local/share/ruinotify) or absolute.
+
+=item * If you want to configure the PulseAudio output device, create a new
+file called "audiodevs".
+
+=item * Add each symbolic sink name as an unique line.
+
+Symbolic sink names can be queried via "pactl list" - look for the top-level
+"Name" key in a "Sink" definition.
+
+The special value "\0default" can be used to output to the default/fallback device.
+
+=back
+
+Afterwards, start it up manually or in any other way you want.
+
+=cut
+
+=head1 SUBROUTINES/METHODS
+
+=head2 void create_dir ($dir[, $directory_description])
+
+Creates a new directory structure as given by $dir if it doesn't exist yet.
+Failures to do so are fatal and will lead to the program's termination.
+
+The optional $directory_description string will be used in error messages
+(only). Note that it will have the string "directory" appended to it.
+
+This function does not return a useful value.
+
+=cut
+
+sub create_dir {
+  my $dir = shift;
+  my $dirdesc = shift;
+
+  if (!(defined ($dir))) {
+    return;
+  }
+
+  if (!(defined ($dirdesc))) {
+    $dirdesc = 'directory';
+  }
+  else {
+    $dirdesc .= ' directory';
+  }
+
+  eval {
+    make_path ($dir);
+    1;
+  } or do {
+    my $err = $!;
+    if (! -d $dir ) {
+      die ("Unable to create $dirdesc '$dir' and it also doesn't exist yet: $err\n");
+    }
+  };
+}
+
+=head2 $logger setup_logger ($logfile, $logfilesize)
+
+Creates and returns a new logger instance.
+
+The new logger instance will use the Log::Log4perl::Appender::File::FixedSize
+backend with $logfile as its backing file and $logfilesize as its rotation
+size.
+
+Not passing $logfile or $logfilesize, passing undef or empty strings is treated
+as an error.
+
+Returns a scalar (pointer) to the new logger if everything was okay or undef on
+error.
+
+=cut
+
+sub setup_logger {
+  my $logfile = shift;
+  my $logfilesize = shift;
+
+  if ((!(defined ($logfile))) || (0 == length ($logfile)) || (!(defined ($logfilesize))) || (0 == length ($logfilesize))) {
+    return;
+  }
+
+  my $logger_config = qq[
+    log4perl.rootLogger = INFO, LOGFILE
+
+    log4perl.appender.LOGFILE = Log::Log4perl::Appender::File::FixedSize
+    log4perl.appender.LOGFILE.filename = $logfile
+    log4perl.appender.LOGFILE.mode = append
+    log4perl.appender.LOGFILE.size = $logfilesize
+
+    log4perl.appender.LOGFILE.layout=PatternLayout
+    log4perl.appender.LOGFILE.layout.ConversionPattern=[%r] [%d] %F %L %c - %m%n
+  ];
+
+  # Create log file if it doesn't exist, File::RoundRobin doesn't create them
+  # automatically or correctly in append mode.
+  # Essentially. File::RoundRobin, as used by
+  # Log::Log4perl::Appender::File::FixedSize, expects some header values, but
+  # those are only written if properly created using the "new" method.
+  if (! -e $logfile) {
+    my $logfilefh = File::RoundRobin->new (path => $logfile, size => $logfilesize, mode => 'new');
+    $logfilefh->close ();
+    $logfilefh = undef;
+  }
+
+  Log::Log4perl::init (\$logger_config);
+  return (Log::Log4perl::get_logger ());
+}
+
+=head2 $useragent prepare_webrequest ()
+
+Sets up a new LWP::UserAgent object with some custom values.
+
+Does not take any parameters.
+
+Returns the new LWP::UserAgent object.
+
+=cut
+
+sub prepare_webrequest {
+  my $useragent = LWP::UserAgent->new (timeout => 3);
+  $useragent->env_proxy;
+
+  # Fake Firefox 68 on Windows 10 UA.
+  $useragent->agent ('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:68.0) Gecko/20100101 Firefox/69.0');
+
+  return ($useragent);
+}
+
+=head2 $lockfh acquire_lock ($lockfile, $logger)
+
+Tries to acquire an exclusive lock on the internal lockfile.
+
+If acquiring an exclusive lock is not possible, terminates the program.
+
+Takes $lockfile, a string specifying the lockfile location and $logger, a
+reference to a Log::Log4perl object. Both must not be undef.
+
+Returns a file handle for the lock file or undef on error.
+
+=cut
+
+sub acquire_lock {
+  my $lockfile = shift;
+  my $logger =shift;
+
+  if ((!(defined ($lockfile))) || (!(defined ($logger)))) {
+    return;
+  }
+
+  open (my $lockfh, '>', $lockfile) or $logger->logdie ("Unable to open lockfile '$lockfile' in write mode: $!");
+
+  flock ($lockfh, LOCK_EX | LOCK_NB) or $logger->logdie ("Unable to acquire lock on lockfile '$lockfile'. Probably still locked.");
+
+  return ($lockfh);
+}
+
+=head2 $datafh open_data ($datafile, $logger)
+
+Tries to open the internal data file.
+
+If opening (or creating) it is not possible, terminates the program.
+
+Takes $datafile, a string specifying the data file location and $logger, a
+reference to a Log::Log4perl object. Both must not be undef.
+
+Returns a file handle for the data file or undef on error.
+
+=cut
+
+sub open_data {
+  my $ruinerdata = shift;
+  my $logger = shift;
+
+  if ((!(defined ($ruinerdata))) || (!(defined ($logger)))) {
+    $logger->error ("Passed invalid data to " . (caller(0))[3] . ".") if defined ($logger);
+    return;
+  }
+
+  my $fh = undef;
+  if (!(open ($fh, '+>>:encoding(UTF-8)', $ruinerdata))) {
+    $logger->logdie ("Unable to open data file '$ruinerdata' for reading and writing: $!");
+  }
+  seek ($fh, 0, SEEK_SET);
+
+  return ($fh);
+}
+
+=head2 @content read_config ($configfile)
+
+Tries to open a config file and read and return its content.
+
+Takes $configfile, a string specifying the config file location. Must not be
+undef.
+
+Returns an array with the config file content, one entry per line. Non-existent
+files are not treated as an error - rather, the returned array will be empty.
+
+=cut
+
+sub read_config {
+  my @ret = ( );
+
+  my $configfile = shift;
+
+  my $open_ret = open (my $configfile_fh, '<', $configfile);
+
+  if (defined ($open_ret)) {
+    while (my $row = <$configfile_fh>) {
+      chomp ($row);
+      push (@ret, $row);
+    }
+  }
+
+  close ($configfile_fh);
+
+  return (@ret);
+}
+
+=head2 bool fetch_and_parse_json ($useragent, $url, $logger, \$skip, \$userid, \$bcastcount, \$bcastid)
+
+Tries to fetch and parse JSON data for a particular streamer, as specified by
+the URL.
+
+Takes a reference to an LWP::UserAgent object as $useragent, a string
+specifying the remote API URL returning JSON data as $url, a Log::Log4perl
+object reference as $logger, a skip output parameter as reference as $skip,
+and three string references as $userid, $bcastcount and $bcastid, which will
+be populated during the parsing operation. All parameters must not be undef.
+
+Returns true on success, false on error.
+
+=cut
+
+sub fetch_and_parse_json {
+  my $useragent = shift;
+  my $url = shift;
+  my $logger = shift;
+  my $skip = shift;
+  my $userid = shift;
+  my $bcastcount = shift;
+  my $bcastid = shift;
+
+  my $ret = 0;
+
+  if ((!(defined ($useragent))) || (!(defined ($url))) || (!(defined ($logger))) || (!(defined ($skip))) || (!(defined ($userid))) || (!(defined ($bcastcount))) || (!(defined ($bcastid)))
+      || ('SCALAR' ne ref ($skip)) || ('Log::Log4perl::Logger' ne ref ($logger)) || ('SCALAR' ne ref ($userid)) || ('SCALAR' ne ref ($bcastcount)) || ('SCALAR' ne ref ($bcastid))) {
+    $logger->error ("Passed invalid data to " . (caller(0))[3] . ".") if defined ($logger);
+    return ($ret);
+  }
+
+  $$skip = 0;
+
+  my $response = $useragent->get ($url =~ tr{\040-\176}{\120-\176\117\040-\116}r);
+
+  if (!($response->is_success)) {
+    $logger->warn ("Unable to fetch user information, retrying later: $response->status_line");
+    $$skip = 1;
+    return ($ret);
+  }
+
+  $$skip = 0;
+
+  my $content = $response->decoded_content;
+  my $parsed_json = JSON::PP->new->utf8->decode ($content);
+
+  if (!(defined ($parsed_json))) {
+    $logger->warn ("Could not decode returned string as JSON, retrying later.");
+    $$skip = 1;
+    return ($ret);
+  }
+
+  $logger->debug ("Parsed JSON data:\n\n", Dumper ($parsed_json));
+
+  if (!(exists ($parsed_json->{'errorCode'}))) {
+    # No errorCode is... an error, I guess.
+    $logger->warn ("Unable to find errorCode in response.");
+    $$skip = 1;
+    return ($ret);
+  }
+
+  if (0 != $parsed_json->{'errorCode'}) {
+    # User not online, try again later.
+    $logger->info ("User currently offline, retrying...");
+    $ret = 1;
+    $$skip = 1;
+    return ($ret);
+  }
+
+  $$skip = 0;
+
+  if (!(exists ($parsed_json->{'userId'}))) {
+    $logger->warn ("No userId data found. API change, broken response or different error.");
+  }
+  else {
+    $$userid = $parsed_json->{'userId'};
+    $logger->info ("Got userid: $$userid");
+  }
+
+  if (!(exists ($parsed_json->{'broadcastsCount'}))) {
+    $logger->warn ("No broadcastsCount data found. API change, broken response or different error.");
+  }
+  else {
+    $$bcastcount = $parsed_json->{'broadcastsCount'};
+    $logger->info ("Got bcastcount: $$bcastcount");
+  }
+
+  if (!(exists ($parsed_json->{'broadcastId'}))) {
+    $logger->warn ("No broadcastsCount data found. API change, broken response or different error.");
+  }
+  else {
+    $$bcastid = $parsed_json->{'broadcastId'};
+    $logger->info ("Got bcastid: $$bcastid");
+  }
+
+  $ret = 1;
+
+  return ($ret);
+}
+
+=head2 bool play_notifications (\@audiodevs, \@audiofiles, $logger)
+
+Tries to play notification sounds to the specified audio devices.
+
+Takes a reference to an array of PulseAudio devices as \@audiodevs, a reference
+to an array of audio files as \@audiofiles and a Log::Log4perl object reference
+as $logger. All parameters must not be undef.
+
+Returns true on success, false on error.
+
+=cut
+
+sub play_notifications {
+  my $audiodevs_ref = shift;
+  my $audiofiles_ref = shift;
+  my $logger = shift;
+
+  my $ret = 1;
+
+  if ((!(defined ($audiodevs_ref))) || (!(defined ($audiofiles_ref))) || (!(defined ($logger)))
+      || ('ARRAY' ne ref ($audiodevs_ref)) || ('ARRAY' ne ref ($audiofiles_ref))) {
+    $logger->error ("Passed invalid data to " . (caller(0))[3] . ".") if defined ($logger);
+    $ret = 0;
+    return ($ret);
+  }
+
+  $logger->info ("Running alert mode.");
+
+  OUTER: for (my $i = 0; $i < 3; ++$i) {
+    foreach my $audiodev (@$audiodevs_ref) {
+      foreach my $audiofile (@$audiofiles_ref) {
+
+        my $paplay_cmd = 'paplay';
+        my @paplay_cmd_args = ( );
+
+        if ("\0default" ne $audiodev) {
+          push (@paplay_cmd_args, '-d', $audiodev);
+        }
+
+        push (@paplay_cmd_args, $audiofile);
+
+        system ($paplay_cmd, @paplay_cmd_args);
+
+        if (-1 == $?) {
+          $logger->error ("Unable to execute paplay, configuration broken, incompatible, or paplay binary not available.");
+          $ret = 0;
+          last (OUTER);
+        }
+        elsif ($? & 127) {
+          $logger->error ("paplay died with signal " . ($? & 127));
+          $ret = 0;
+          last (OUTER);
+        }
+        elsif (0 != $?) {
+          $logger->error ("paplay exited with return code $?, signifying a broken or incompatible configuration, audio files not being available or PulseAudio daemon not running correctly.");
+          $ret = 0;
+          last (OUTER);
+        }
+      }
+    }
+
+    sleep (3);
+  }
+
+  return ($ret);
+}
+
+=head2 $retval main (@args)
+
+Executes the actual program.
+
+Parameters are the list of arguments when called.
+
+Returns a standard process return value.
+
+=cut
+
+sub main {
+  my $lockfh = undef;
+  my $ruinerdatafh = undef;
+
+  my $prog_name = 'ruinotify';
+
+  my $datadir = data_dirs ($prog_name);
+  my $configdir = config_dirs ($prog_name);
+
+  if (!(defined ($datadir))) {
+    $datadir = data_home ($prog_name);
+  }
+  if (!(defined ($configdir))) {
+    $configdir = config_home ($prog_name);
+  }
+
+  create_dir ($datadir, 'data');
+  create_dir ($configdir, 'config');
+
+  my $logger = setup_logger ("$datadir/log", '10M');
+
+  if (!(defined ($logger))) {
+    die ("Unable to create logger, exiting.\n");
+  }
+
+  $lockfh = acquire_lock (File::Spec->catfile ($datadir, 'lock'), $logger);
+
+  if (!(defined ($lockfh))) {
+    $logger->logdie ("Internal error while acquiring lock, exiting.");
+  }
+
+  my $baseurl = '8DD@Cj__1@9^I?E>?G^3?=_@8@_1@9_2B?1431CD_9>6?_3EBy4m`_EC5Bm';
+  my $user = 'tB1385/O669J95<<';
+  #$user = '}EC93]!E9J'; # Usually good for testing stuff...
+  my $url = "$baseurl$user";
+
+  my $useragent = prepare_webrequest ();
+
+  $ruinerdatafh = open_data (File::Spec->catfile ($datadir, 'data'), $logger);
+
+  if (!(defined ($ruinerdatafh))) {
+    $logger->logdie ("Internal error while opening internal data, exiting.");
+  }
+
+  my @audiodevs = read_config (File::Spec->catfile ($configdir, 'audiodevs'));
+  my @audiofiles = read_config (File::Spec->catfile ($configdir, 'audiofiles'));
+
+  if (0 == scalar (@audiodevs)) {
+    # No audiodevs defined, add pseudo element.
+    # This should not be a valid device name, since PulseAudio uses C strings which
+    # cannot contain NULL bytes.
+    push (@audiodevs, "\0default");
+  }
+
+  if (0 == scalar (@audiofiles)) {
+    $logger->logdie ("No alarm files defined, but executing this script without at least one alarm sound defined doesn't make sense.");
+  }
+
+  while (1) {
+    sleep (9);
+
+    my $skip = undef;
+    my $new_userid = undef;
+    my $new_bcastcount = undef;
+    my $new_bcastid = undef;
+    my $alert = 1;
+
+    my $ret = fetch_and_parse_json ($useragent, $url, $logger, \$skip, \$new_userid, \$new_bcastcount, \$new_bcastid);
+    if (0 == $ret) {
+      $logger->warn ("Error while fetching and parsing JSON data, retrying...");
+      next;
+    }
+
+    if (0 != $skip) {
+      next;
+    }
+
+    # Reset filehandle to beginning of file. It probably is at (or close to EOF)
+    # right now since we wrote data to it in the previous run.
+    seek ($ruinerdatafh, 0, SEEK_SET);
+
+    # Read first line, optionally chomp it.
+    my $row = <$ruinerdatafh>;
+    if (defined ($row)) {
+      chomp ($row);
+    }
+
+    my $userid = $row;
+    if (defined ($userid)) {
+      $logger->info ("Old userid read as $userid");
+    }
+    else {
+      $logger->info ("No old userid available, will treat as completely unknown.");
+    }
+
+    # Read second line, optionally chomp it.
+    $row = <$ruinerdatafh>;
+    if (defined ($row)) {
+      chomp ($row);
+    }
+
+    my $bcastcount = $row;
+    if (defined ($bcastcount)) {
+      $logger->info ("Old broadcast count was $bcastcount.");
+    }
+
+    # Reset file contents, we'll write new values later on.
+    truncate ($ruinerdatafh, 0);
+
+    if (defined ($userid)) {
+      if ($userid eq $new_userid) {
+        if (defined ($bcastcount)) {
+          if ($bcastcount > $new_bcastcount) {
+            $logger->logdie ("New broadcast count returned is smaller than previously fetched one... time travel much?");
+          }
+          elsif ($bcastcount == $new_bcastcount) {
+            $logger->info ("Not alerting, neither user ID nor the broadcast count changed.");
+            $alert = 0;
+          }
+        }
+      }
+    }
+
+    print $ruinerdatafh "$new_userid\n$new_bcastcount\n$new_bcastid\n";
+    $ruinerdatafh->flush ();
+
+    if ($alert) {
+      # Make relative values in audiofiles config file work by changing
+      # the cwd to application's datadir.
+      chdir $datadir;
+
+      $ret = play_notifications (\@audiodevs, \@audiofiles, $logger);
+
+      if (0 == $ret) {
+        $logger->logdie ("Error while playing notification sound, configuration probably invalid, giving up.");
+      }
+    }
+  }
+}
+
+=head1 BUGS
+
+=over
+
+=item * The broadcaster name is hardcoded.
+
+It should eventually be made configurable, preferably in a config file.
+
+=item * Playback issues are treated as hard errors.
+
+While the program will not terminate on playback issues (i.e., whenever paplay
+does not return an exit code of zero), it should handle them more gracefully.
+
+Some people with more complex setups usually want to play alerts on multiple
+devices, however, not all devices might always be connected. In such a case
+it's probably fine to skip playback on affected (e.g., disconnected) devices,
+but still output to other available and working devices and to not treat this
+as an error.
+
+This behavior, likewise, should be made configurable.
+
+=item * Configuration is only read once at startup.
+
+The application should react to SIGHUP and re-read its configuration files when
+instructed by that signal.
+
+Alternatively, a more complicated scheme such as listening for file change
+notifications could be employed, automating this process. The drawback of this
+approach essentially is reading incomplete or wrong data (depending on when and
+what users save while editing files).
+
+=item * Only audio files supported by paplay can be used.
+
+No support for MP3, OPUS, AAC or other fancy files, sorry. paplay uses
+libsndfile internally, which supports a mixture of raw PCM data, FLAC, Vorbis
+and a specific GSM codec wrapped in different containers.
+
+Not sure if it makes sense to support other decoders. Notification sounds are
+usually small enough to not cause inconveniences...
+
+=item * Can not be snoozed.
+
+Sometimes, users might wish to snooze alarms. While they technically could do
+that by killing the application and restarting it after the "snooze" period,
+that's not very comfortable.
+
+Sending SIGUSR1 to snooze notifications for 5 minutes or SIGUSR2 to snooze them
+for 30 minutes (if possible also stackable) sounds like a better plan.
+
+=item * No daemon mode.
+
+A daemonizing mode would probably make sense, given that the application pretty
+much is a daemon in the first place.
+
+=item * Only systems with tight PulseAudio integration are supported.
+
+Sorry, Windows users. That mostly means UNIX-likes operating systems.
+Technically, though, PulseAudio also works on Windows, but needs to be started
+manually which is quite a hassle.
+
+Don't get your hopes up on that feature... or implement it yourself, I guess.
+
+=back
+
+=head1 COPYRIGHT
+
+=over
+
+=item 3-Clause BSD
+
+Copyright 2019 rdbrschf <54837367+rdbrschf@users.noreply.github.com>
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+=over
+
+=item 1. Redistributions of source code must retain the above copyright notice,
+this list of conditions and the following disclaimer.
+
+=item 2. Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+=item 3. Neither the name of the copyright holder nor the names of its
+contributors may be used to endorse or promote products derived from this
+software without specific prior written permission.
+
+=back
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+=back
+
+=cut
