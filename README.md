@@ -1,7 +1,7 @@
-= Content
+# Content
 
-== Stand-Alone Applications
+## Stand-Alone Applications
 
-=== ruinotify
+### ruinotify
 
 A rather simple stream notifier.
