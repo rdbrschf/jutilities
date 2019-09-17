@@ -1,0 +1,6 @@
+# Temporary or backup files
+*.sw?
+*~
+
+# This file.
+.gitignore
