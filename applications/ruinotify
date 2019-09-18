@@ -146,7 +146,7 @@ sub setup_logger {
     return;
   }
 
-  my $logger_config = qq[
+  my $logger_config = <<"END_LOGGER_CONFIG";
     log4perl.rootLogger = INFO, LOGFILE
 
     log4perl.appender.LOGFILE = Log::Log4perl::Appender::File::FixedSize
@@ -156,7 +156,11 @@ sub setup_logger {
 
     log4perl.appender.LOGFILE.layout=PatternLayout
     log4perl.appender.LOGFILE.layout.ConversionPattern=[%r] [%d] %F %L %c - %m%n
-  ];
+END_LOGGER_CONFIG
+  # I'd very much like to correctly indent the ending separator here, but I
+  # can't.
+  # vim's syntax highlighting is confused by that and will incorrectly "mark"
+  # the rest of the file as one big string, which is just... plainly wrong.
 
   # Create log file if it doesn't exist, File::RoundRobin doesn't create them
   # automatically or correctly in append mode.
