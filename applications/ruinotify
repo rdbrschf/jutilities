@@ -184,7 +184,7 @@ sub prepare_webrequest {
   my $useragent = LWP::UserAgent->new (timeout => 3);
   $useragent->env_proxy;
 
-  # Fake Firefox 68 on Windows 10 UA.
+  # Fake Firefox 69 on Windows 10 UA.
   $useragent->agent ('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:68.0) Gecko/20100101 Firefox/69.0');
 
   return ($useragent);
