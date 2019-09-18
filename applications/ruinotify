@@ -291,9 +291,11 @@ sub read_config {
       chomp ($row);
       push (@ret, $row);
     }
-  }
 
-  close ($configfile_fh);
+    if (0 == close ($configfile_fh)) {
+      $logger->error ("Unable to close config file handle for $configfile.");
+    }
+  }
 
   return (@ret);
 }
