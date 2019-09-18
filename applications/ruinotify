@@ -10,10 +10,10 @@ use File::BaseDir qw(data_dirs config_dirs data_home config_home);
 use File::Path qw(make_path);
 use File::Spec;
 use IO::Handle qw(flush);
+use Data::Dumper;
 use POSIX qw(EXIT_FAILURE EXIT_SUCCESS);
 use Log::Log4perl;
 use Log::Log4perl::Appender::File::FixedSize;
-use Data::Dumper;
 
 exit (main (@ARGV));
 
