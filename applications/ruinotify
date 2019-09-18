@@ -254,8 +254,8 @@ sub open_data {
 
 Tries to open a config file and read and return its content.
 
-Takes $configfile, a string specifying the config file location. Must not be
-undef.
+Takes $configfile, a string specifying the config file location and $logger,
+a Log::Log4perl object. Must not be undef.
 
 Returns an array with the config file content, one entry per line. Non-existent
 files are not treated as an error - rather, the returned array will be empty.
@@ -266,6 +266,16 @@ sub read_config {
   my @ret = ( );
 
   my $configfile = shift;
+  my $logger = shift;
+
+  if ((!(defined ($configfile))) || (!(defined ($logger)))) {
+    if (defined ($logger)) {
+      ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
+      $logger->error ('Passed invalid data to ' . (caller(0))[3] . q{.});
+      ## use critic (ValuesAndExpressions::ProhibitMagicNumbers)
+    }
+    return (@ret);
+  }
 
   my $open_ret = open (my $configfile_fh, '<', $configfile);
 
@@ -503,8 +513,8 @@ sub main {
     $logger->logdie ("Internal error while opening internal data, exiting.");
   }
 
-  my @audiodevs = read_config (File::Spec->catfile ($configdir, 'audiodevs'));
-  my @audiofiles = read_config (File::Spec->catfile ($configdir, 'audiofiles'));
+  my @audiodevs = read_config (File::Spec->catfile ($configdir, 'audiodevs'), $logger);
+  my @audiofiles = read_config (File::Spec->catfile ($configdir, 'audiofiles'), $logger);
 
   if (0 == scalar (@audiodevs)) {
     # No audiodevs defined, add pseudo element.
