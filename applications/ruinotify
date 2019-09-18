@@ -208,6 +208,7 @@ sub acquire_lock {
   my $logger =shift;
 
   if ((!(defined ($lockfile))) || (!(defined ($logger)))) {
+    $logger->error ("Passed invalid data to " . (caller(0))[3] . ".") if defined ($logger);
     return;
   }
 
