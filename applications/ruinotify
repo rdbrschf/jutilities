@@ -593,7 +593,9 @@ sub main {
       }
     }
 
-    print $datafh "$new_userid\n$new_bcastcount\n$new_bcastid\n";
+    if (0 == print {$datafh} "$new_userid\n$new_bcastcount\n$new_bcastid\n") {
+      $logger->logdie ('Unable to write new data to data file, exiting.');
+    }
     $datafh->flush ();
 
     if ($alert) {
