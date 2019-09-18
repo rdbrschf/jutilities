@@ -118,6 +118,8 @@ sub create_dir {
       die ("Unable to create $dirdesc '$dir' and it also doesn't exist yet: $err\n");
     }
   };
+
+  return;
 }
 
 =head2 $logger setup_logger ($logfile, $logfilesize)
