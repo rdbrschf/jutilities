@@ -333,24 +333,24 @@ sub fetch_and_parse_json {
     return ($ret);
   }
 
-  $$skip = 0;
+  ${$skip} = 0;
 
   my $response = $useragent->get ($url =~ tr{\040-\176}{\120-\176\117\040-\116}r);
 
   if (!($response->is_success)) {
     $logger->warn ("Unable to fetch user information, retrying later: $response->status_line");
-    $$skip = 1;
+    ${$skip} = 1;
     return ($ret);
   }
 
-  $$skip = 0;
+  ${$skip} = 0;
 
   my $content = $response->decoded_content;
   my $parsed_json = JSON::PP->new->utf8->decode ($content);
 
   if (!(defined ($parsed_json))) {
     $logger->warn ("Could not decode returned string as JSON, retrying later.");
-    $$skip = 1;
+    ${$skip} = 1;
     return ($ret);
   }
 
@@ -359,7 +359,7 @@ sub fetch_and_parse_json {
   if (!(exists ($parsed_json->{'errorCode'}))) {
     # No errorCode is... an error, I guess.
     $logger->warn ("Unable to find errorCode in response.");
-    $$skip = 1;
+    ${$skip} = 1;
     return ($ret);
   }
 
@@ -367,17 +367,17 @@ sub fetch_and_parse_json {
     # User not online, try again later.
     $logger->info ("User currently offline, retrying...");
     $ret = 1;
-    $$skip = 1;
+    ${$skip} = 1;
     return ($ret);
   }
 
-  $$skip = 0;
+  ${$skip} = 0;
 
   if (!(exists ($parsed_json->{'userId'}))) {
     $logger->warn ("No userId data found. API change, broken response or different error.");
   }
   else {
-    $$userid = $parsed_json->{'userId'};
+    ${$userid} = $parsed_json->{'userId'};
     $logger->info ("Got userid: $$userid");
   }
 
@@ -385,7 +385,7 @@ sub fetch_and_parse_json {
     $logger->warn ("No broadcastsCount data found. API change, broken response or different error.");
   }
   else {
-    $$bcastcount = $parsed_json->{'broadcastsCount'};
+    ${$bcastcount} = $parsed_json->{'broadcastsCount'};
     $logger->info ("Got bcastcount: $$bcastcount");
   }
 
@@ -393,7 +393,7 @@ sub fetch_and_parse_json {
     $logger->warn ("No broadcastsCount data found. API change, broken response or different error.");
   }
   else {
-    $$bcastid = $parsed_json->{'broadcastId'};
+    ${$bcastid} = $parsed_json->{'broadcastId'};
     $logger->info ("Got bcastid: $$bcastid");
   }
 
@@ -431,8 +431,8 @@ sub play_notifications {
   $logger->info ("Running alert mode.");
 
   OUTER: for (my $i = 0; $i < 3; ++$i) {
-    foreach my $audiodev (@$audiodevs_ref) {
-      foreach my $audiofile (@$audiofiles_ref) {
+    foreach my $audiodev (@{$audiodevs_ref}) {
+      foreach my $audiofile (@{$audiofiles_ref}) {
 
         my $paplay_cmd = 'paplay';
         my @paplay_cmd_args = ( );
