@@ -10,6 +10,7 @@ use File::BaseDir qw(data_dirs config_dirs data_home config_home);
 use File::Path qw(make_path);
 use File::Spec;
 use IO::Handle qw(flush);
+use POSIX qw(EXIT_FAILURE EXIT_SUCCESS);
 use Log::Log4perl;
 use Log::Log4perl::Appender::File::FixedSize;
 use Data::Dumper;
@@ -607,6 +608,15 @@ sub main {
       }
     }
   }
+
+  # Should never be reached, but might make Perl::Critic happy.
+  if (0 == close ($datafh)) {
+    $logger->error ('Unable to close data file handle.');
+  }
+
+  # Given that this line shouldn't be reached in the first place, we might as
+  # well return an error code.
+  return (POSIX::EXIT_FAILURE);
 }
 
 =head1 BUGS
