@@ -11,6 +11,7 @@ use File::Path qw(make_path);
 use File::Spec;
 use IO::Handle qw(flush);
 use Data::Dumper;
+use English qw(-no_match_vars);
 use POSIX qw(EXIT_FAILURE EXIT_SUCCESS);
 use Log::Log4perl;
 use Log::Log4perl::Appender::File::FixedSize;
@@ -113,7 +114,7 @@ sub create_dir {
     make_path ($dir);
     1;
   } or do {
-    my $err = $!;
+    my $err = $ERRNO;
     if (! -d $dir ) {
       die ("Unable to create $dirdesc '$dir' and it also doesn't exist yet: $err\n");
     }
@@ -219,7 +220,7 @@ sub acquire_lock {
     return;
   }
 
-  open (my $lockfh, '>', $lockfile) or $logger->logdie ("Unable to open lockfile '$lockfile' in write mode: $!");
+  open (my $lockfh, '>', $lockfile) or $logger->logdie ("Unable to open lockfile '$lockfile' in write mode: $ERRNO");
 
   flock ($lockfh, LOCK_EX | LOCK_NB) or $logger->logdie ("Unable to acquire lock on lockfile '$lockfile'. Probably still locked.");
 
@@ -250,7 +251,7 @@ sub open_data {
 
   my $fh = undef;
   if (!(open ($fh, '+>>:encoding(UTF-8)', $datafile))) {
-    $logger->logdie ("Unable to open data file '$datafile' for reading and writing: $!");
+    $logger->logdie ("Unable to open data file '$datafile' for reading and writing: $ERRNO");
   }
   seek ($fh, 0, SEEK_SET);
 
@@ -444,18 +445,18 @@ sub play_notifications {
 
         system ($paplay_cmd, @paplay_cmd_args);
 
-        if (-1 == $?) {
-          $logger->error ("Unable to execute paplay, configuration broken, incompatible, or paplay binary not available.");
+        if (-1 == $CHILD_ERROR) {
+          $logger->error ('Unable to execute paplay, configuration broken, incompatible, or paplay binary not available.');
           $ret = 0;
           last (OUTER);
         }
-        elsif ($? & 127) {
-          $logger->error ("paplay died with signal " . ($? & 127));
+        elsif ($CHILD_ERROR & 127) {
+          $logger->error ('paplay died with signal ' . ($CHILD_ERROR & 127));
           $ret = 0;
           last (OUTER);
         }
-        elsif (0 != $?) {
-          $logger->error ("paplay exited with return code $?, signifying a broken or incompatible configuration, audio files not being available or PulseAudio daemon not running correctly.");
+        elsif (0 != $CHILD_ERROR) {
+          $logger->error ("paplay exited with return code $CHILD_ERROR, signifying a broken or incompatible configuration, audio files not being available or PulseAudio daemon not running correctly.");
           $ret = 0;
           last (OUTER);
         }
