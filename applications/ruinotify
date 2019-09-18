@@ -16,6 +16,8 @@ use POSIX qw(EXIT_FAILURE EXIT_SUCCESS);
 use Log::Log4perl;
 use Log::Log4perl::Appender::File::FixedSize;
 
+## no critic (CodeLayout::ProhibitParensWithBuiltins, ControlStructures::ProhibitCStyleForLoops)
+
 exit (main (@ARGV));
 
 =head1 NAME
@@ -216,7 +218,11 @@ sub acquire_lock {
   my $logger =shift;
 
   if ((!(defined ($lockfile))) || (!(defined ($logger)))) {
-    $logger->error ("Passed invalid data to " . (caller(0))[3] . ".") if defined ($logger);
+    if (defined ($logger)) {
+      ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
+      $logger->error ('Passed invalid data to ' . (caller(0))[3] . q{.});
+      ## use critic (ValuesAndExpressions::ProhibitMagicNumbers)
+    }
     return;
   }
 
@@ -245,7 +251,11 @@ sub open_data {
   my $logger = shift;
 
   if ((!(defined ($datafile))) || (!(defined ($logger)))) {
-    $logger->error ("Passed invalid data to " . (caller(0))[3] . ".") if defined ($logger);
+    if (defined ($logger)) {
+      ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
+      $logger->error ('Passed invalid data to ' . (caller(0))[3] . q{.});
+      ## use critic (ValuesAndExpressions::ProhibitMagicNumbers)
+    }
     return;
   }
 
@@ -329,7 +339,11 @@ sub fetch_and_parse_json {
 
   if ((!(defined ($useragent))) || (!(defined ($url))) || (!(defined ($logger))) || (!(defined ($skip))) || (!(defined ($userid))) || (!(defined ($bcastcount))) || (!(defined ($bcastid)))
       || ('SCALAR' ne ref ($skip)) || ('Log::Log4perl::Logger' ne ref ($logger)) || ('SCALAR' ne ref ($userid)) || ('SCALAR' ne ref ($bcastcount)) || ('SCALAR' ne ref ($bcastid))) {
-    $logger->error ("Passed invalid data to " . (caller(0))[3] . ".") if defined ($logger);
+    if (defined ($logger)) {
+      ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
+      $logger->error ('Passed invalid data to ' . (caller(0))[3] . q{.});
+      ## use critic (ValuesAndExpressions::ProhibitMagicNumbers)
+    }
     return ($ret);
   }
 
@@ -349,7 +363,7 @@ sub fetch_and_parse_json {
   my $parsed_json = JSON::PP->new->utf8->decode ($content);
 
   if (!(defined ($parsed_json))) {
-    $logger->warn ("Could not decode returned string as JSON, retrying later.");
+    $logger->warn ('Could not decode returned string as JSON, retrying later.');
     ${$skip} = 1;
     return ($ret);
   }
@@ -358,14 +372,14 @@ sub fetch_and_parse_json {
 
   if (!(exists ($parsed_json->{'errorCode'}))) {
     # No errorCode is... an error, I guess.
-    $logger->warn ("Unable to find errorCode in response.");
+    $logger->warn ('Unable to find errorCode in response.');
     ${$skip} = 1;
     return ($ret);
   }
 
   if (0 != $parsed_json->{'errorCode'}) {
     # User not online, try again later.
-    $logger->info ("User currently offline, retrying...");
+    $logger->info ('User currently offline, retrying...');
     $ret = 1;
     ${$skip} = 1;
     return ($ret);
@@ -374,27 +388,27 @@ sub fetch_and_parse_json {
   ${$skip} = 0;
 
   if (!(exists ($parsed_json->{'userId'}))) {
-    $logger->warn ("No userId data found. API change, broken response or different error.");
+    $logger->warn ('No userId data found. API change, broken response or different error.');
   }
   else {
     ${$userid} = $parsed_json->{'userId'};
-    $logger->info ("Got userid: $$userid");
+    $logger->info ("Got userid: ${$userid}");
   }
 
   if (!(exists ($parsed_json->{'broadcastsCount'}))) {
-    $logger->warn ("No broadcastsCount data found. API change, broken response or different error.");
+    $logger->warn ('No broadcastsCount data found. API change, broken response or different error.');
   }
   else {
     ${$bcastcount} = $parsed_json->{'broadcastsCount'};
-    $logger->info ("Got bcastcount: $$bcastcount");
+    $logger->info ("Got bcastcount: ${$bcastcount}");
   }
 
   if (!(exists ($parsed_json->{'broadcastId'}))) {
-    $logger->warn ("No broadcastsCount data found. API change, broken response or different error.");
+    $logger->warn ('No broadcastsCount data found. API change, broken response or different error.');
   }
   else {
     ${$bcastid} = $parsed_json->{'broadcastId'};
-    $logger->info ("Got bcastid: $$bcastid");
+    $logger->info ("Got bcastid: ${$bcastid}");
   }
 
   $ret = 1;
@@ -423,14 +437,20 @@ sub play_notifications {
 
   if ((!(defined ($audiodevs_ref))) || (!(defined ($audiofiles_ref))) || (!(defined ($logger)))
       || ('ARRAY' ne ref ($audiodevs_ref)) || ('ARRAY' ne ref ($audiofiles_ref))) {
-    $logger->error ("Passed invalid data to " . (caller(0))[3] . ".") if defined ($logger);
+    if (defined ($logger)) {
+      ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
+      $logger->error ('Passed invalid data to ' . (caller(0))[3] . q{.});
+      ## use critic (ValuesAndExpressions::ProhibitMagicNumbers)
+    }
     $ret = 0;
     return ($ret);
   }
 
-  $logger->info ("Running alert mode.");
+  $logger->info ('Running alert mode.');
 
+  ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
   OUTER: for (my $i = 0; $i < 3; ++$i) {
+    ## use critic (ValuesAndExpressions::ProhibitMagicNumbers)
     foreach my $audiodev (@{$audiodevs_ref}) {
       foreach my $audiofile (@{$audiofiles_ref}) {
 
@@ -463,7 +483,9 @@ sub play_notifications {
       }
     }
 
+    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     sleep (3);
+    ## use critic (ValuesAndExpressions::ProhibitMagicNumbers)
   }
 
   return ($ret);
@@ -507,7 +529,7 @@ sub main {
   $lockfh = acquire_lock (File::Spec->catfile ($datadir, 'lock'), $logger);
 
   if (!(defined ($lockfh))) {
-    $logger->logdie ("Internal error while acquiring lock, exiting.");
+    $logger->logdie ('Internal error while acquiring lock, exiting.');
   }
 
   my $baseurl = '8DD@Cj__1@9^I?E>?G^3?=_@8@_1@9_2B?1431CD_9>6?_3EBy4m`_EC5Bm';
@@ -520,7 +542,7 @@ sub main {
   $datafh = open_data (File::Spec->catfile ($datadir, 'data'), $logger);
 
   if (!(defined ($datafh))) {
-    $logger->logdie ("Internal error while opening internal data, exiting.");
+    $logger->logdie ('Internal error while opening internal data, exiting.');
   }
 
   my @audiodevs = read_config (File::Spec->catfile ($configdir, 'audiodevs'), $logger);
@@ -534,11 +556,13 @@ sub main {
   }
 
   if (0 == scalar (@audiofiles)) {
-    $logger->logdie ("No alarm files defined, but executing this script without at least one alarm sound defined doesn't make sense.");
+    $logger->logdie ('No alarm files defined, but executing this script without at least one alarm sound defined doesn\'t make sense.');
   }
 
   while (1) {
+    ## no critic (ValuesAndExpressions::ProhibitMagicNumbers)
     sleep (9);
+    ## use critic (ValuesAndExpressions::ProhibitMagicNumbers)
 
     my $skip = undef;
     my $new_userid = undef;
@@ -548,7 +572,7 @@ sub main {
 
     my $ret = fetch_and_parse_json ($useragent, $url, $logger, \$skip, \$new_userid, \$new_bcastcount, \$new_bcastid);
     if (0 == $ret) {
-      $logger->warn ("Error while fetching and parsing JSON data, retrying...");
+      $logger->warn ('Error while fetching and parsing JSON data, retrying...');
       next;
     }
 
@@ -571,7 +595,7 @@ sub main {
       $logger->info ("Old userid read as $userid");
     }
     else {
-      $logger->info ("No old userid available, will treat as completely unknown.");
+      $logger->info ('No old userid available, will treat as completely unknown.');
     }
 
     # Read second line, optionally chomp it.
@@ -592,10 +616,10 @@ sub main {
       if ($userid eq $new_userid) {
         if (defined ($bcastcount)) {
           if ($bcastcount > $new_bcastcount) {
-            $logger->logdie ("New broadcast count returned is smaller than previously fetched one... time travel much?");
+            $logger->logdie ('New broadcast count returned is smaller than previously fetched one... time travel much?');
           }
           elsif ($bcastcount == $new_bcastcount) {
-            $logger->info ("Not alerting, neither user ID nor the broadcast count changed.");
+            $logger->info ('Not alerting, neither user ID nor the broadcast count changed.');
             $alert = 0;
           }
         }
@@ -615,7 +639,7 @@ sub main {
       $ret = play_notifications (\@audiodevs, \@audiofiles, $logger);
 
       if (0 == $ret) {
-        $logger->logdie ("Error while playing notification sound, configuration probably invalid, giving up.");
+        $logger->logdie ('Error while playing notification sound, configuration probably invalid, giving up.');
       }
     }
   }
