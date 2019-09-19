@@ -390,8 +390,11 @@ sub fetch_and_parse_json {
 
   ${$skip} = 0;
 
+  $ret = 1;
+
   if (!(exists ($parsed_json->{'userId'}))) {
     $logger->warn ('No userId data found. API change, broken response or different error.');
+    $ret = 0;
   }
   else {
     ${$userid} = $parsed_json->{'userId'};
@@ -400,6 +403,7 @@ sub fetch_and_parse_json {
 
   if (!(exists ($parsed_json->{'broadcastsCount'}))) {
     $logger->warn ('No broadcastsCount data found. API change, broken response or different error.');
+    $ret = 0;
   }
   else {
     ${$bcastcount} = $parsed_json->{'broadcastsCount'};
@@ -408,13 +412,12 @@ sub fetch_and_parse_json {
 
   if (!(exists ($parsed_json->{'broadcastId'}))) {
     $logger->warn ('No broadcastsCount data found. API change, broken response or different error.');
+    $ret = 0;
   }
   else {
     ${$bcastid} = $parsed_json->{'broadcastId'};
     $logger->info ("Got bcastid: ${$bcastid}");
   }
-
-  $ret = 1;
 
   return ($ret);
 }
