@@ -590,7 +590,7 @@ sub main {
     # right now since we wrote data to it in the previous run.
     seek ($datafh, 0, SEEK_SET);
 
-    # Read first line, optionally chomp it.
+    # Read first line - userid, optionally chomp it.
     my $row = <$datafh>;
     if (defined ($row)) {
       chomp ($row);
@@ -604,7 +604,7 @@ sub main {
       $logger->info ('No old userid available, will treat as completely unknown.');
     }
 
-    # Read second line, optionally chomp it.
+    # Read second line - broadcasts count, optionally chomp it.
     $row = <$datafh>;
     if (defined ($row)) {
       chomp ($row);
