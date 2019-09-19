@@ -615,6 +615,17 @@ sub main {
       $logger->info ("Old broadcast count was $bcastcount.");
     }
 
+    # Read third line - current broadcast ID, optionally chomp it.
+    $row = <$datafh>;
+    if (defined ($row)) {
+      chomp ($row);
+    }
+
+    my $bcastid = $row;
+    if (defined ($bcastid)) {
+      $logger->info ("Old broadcast ID was $bcastid.");
+    }
+
     # Reset file contents, we'll write new values later on.
     truncate ($datafh, 0);
 
