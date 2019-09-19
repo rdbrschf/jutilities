@@ -629,6 +629,8 @@ sub main {
     # Reset file contents, we'll write new values later on.
     truncate ($datafh, 0);
 
+    # Note that we can assume that the $new_* variables are set to correctly fetched values,
+    # otherwise the parsing method would have failed and this code be unreachable.
     if (defined ($userid)) {
       if ($userid eq $new_userid) {
         if (defined ($bcastcount)) {
