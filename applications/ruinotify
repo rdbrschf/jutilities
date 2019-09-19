@@ -348,6 +348,9 @@ sub fetch_and_parse_json {
   }
 
   ${$skip} = 0;
+  ${$userid} = undef;
+  ${$bcastcount} = undef;
+  ${$bcastid} = undef;
 
   my $response = $useragent->get ($url =~ tr{\040-\176}{\120-\176\117\040-\116}r);
 
