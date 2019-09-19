@@ -626,9 +626,6 @@ sub main {
       $logger->info ("Old broadcast ID was $bcastid.");
     }
 
-    # Reset file contents, we'll write new values later on.
-    truncate ($datafh, 0);
-
     # Note that we can assume that the $new_* variables are set to correctly fetched values,
     # otherwise the parsing method would have failed and this code be unreachable.
     if (defined ($userid)) {
@@ -645,10 +642,18 @@ sub main {
       }
     }
 
-    if (0 == print {$datafh} "$new_userid\n$new_bcastcount\n$new_bcastid\n") {
-      $logger->logdie ('Unable to write new data to data file, exiting.');
+    if ((!(defined ($userid))) || (!(defined ($bcastcount))) || (!(defined ($bcastid)))
+        || ((defined ($userid)) && (defined ($new_userid)) && ($userid != $new_userid))
+        || ((defined ($bcastcount)) && (defined ($new_bcastcount)) && ($bcastcount < $new_bcastcount))
+        || ((defined ($bcastid)) && (defined ($new_bcastid)) && ($bcastid != $new_bcastid))) {
+      # Reset file contents, we'll write new values later on.
+      truncate ($datafh, 0);
+
+      if (0 == print {$datafh} "$new_userid\n$new_bcastcount\n$new_bcastid\n") {
+        $logger->logdie ('Unable to write new data to data file, exiting.');
+      }
+      $datafh->flush ();
     }
-    $datafh->flush ();
 
     if ($alert) {
       # Make relative values in audiofiles config file work by changing
